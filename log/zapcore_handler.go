@@ -1,13 +1,28 @@
+// Copyright Istio Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package log
 
 import (
 	"fmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"khetao.com/pkg/structured"
 	"runtime"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -31,6 +46,8 @@ func init() {
 	registerDefaultHandler(ZapLogHandlerCallbackFunc)
 }
 
+// ZapLogHandlerCallbackFunc is the handler function that emulates the previous Istio logging output and adds
+// support for errdict package and labels logging.
 func ZapLogHandlerCallbackFunc(
 	level Level,
 	scope *Scope,
@@ -83,6 +100,7 @@ func ZapLogHandlerCallbackFunc(
 	emit(scope, toZapLevel[level], msg, fields)
 }
 
+// appendNotEmptyField appends a field with key:value to fields. If value is empty, it does nothing.
 func appendNotEmptyField(fields []zapcore.Field, key, value string) []zapcore.Field {
 	if key == "" || value == "" {
 		return fields
@@ -90,6 +108,7 @@ func appendNotEmptyField(fields []zapcore.Field, key, value string) []zapcore.Fi
 	return append(fields, zap.String(key, value))
 }
 
+// appendNotEmptyString appends a key=value string to sb. If value is empty, it does nothing.
 func appendNotEmptyString(sb *strings.Builder, key, value string) {
 	if key == "" || value == "" {
 		return
@@ -97,6 +116,8 @@ func appendNotEmptyString(sb *strings.Builder, key, value string) {
 	sb.WriteString(fmt.Sprintf("%s=%v ", key, value))
 }
 
+// callerSkipOffset is how many callers to pop off the stack to determine the caller function locality, used for
+// adding file/line number to log output.
 const callerSkipOffset = 4
 
 func dumpStack(level zapcore.Level, scope *Scope) bool {
@@ -136,6 +157,7 @@ func emit(scope *Scope, level zapcore.Level, msg string, fields []zapcore.Field)
 	}
 }
 
+// toErrString returns the string representation of err, handling the nil case.
 func toErrString(err error) string {
 	if err == nil {
 		return ""

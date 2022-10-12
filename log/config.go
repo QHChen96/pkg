@@ -1,21 +1,72 @@
 // Copyright 2017 Istio Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
+// Package log provides the canonical logging functionality used by Go-based
+// Istio components.
+//
+// Istio's logging subsystem is built on top of the [Zap](https://godoc.org/go.uber.org/zap) package.
+// High performance scenarios should use the Error, Warn, Info, and Debug methods. Lower perf
+// scenarios can use the more expensive convenience methods such as Debugf and Warnw.
+//
+// The package provides direct integration with the Cobra command-line processor which makes it
+// easy to build programs that use a consistent interface for logging. Here's an example
+// of a simple Cobra-based program using this log package:
+//
+//			func main() {
+//				// get the default logging options
+//				options := log.DefaultOptions()
+//
+//				rootCmd := &cobra.Command{
+//					Run: func(cmd *cobra.Command, args []string) {
+//
+//						// configure the logging system
+//						if err := log.Configure(options); err != nil {
+//	                     // print an error and quit
+//	                 }
+//
+//						// output some logs
+//						log.Info("Hello")
+//						log.Sync()
+//					},
+//				}
+//
+//				// add logging-specific flags to the cobra command
+//				options.AttachCobraFlags(rootCmd)
+//				rootCmd.SetArgs(os.Args[1:])
+//				rootCmd.Execute()
+//			}
+//
+// Once configured, this package intercepts the output of the standard golang "log" package as well as anything
+// sent to the global zap logger (zap.L()).
 package log
 
 import (
+	"os"
+	"strings"
+	"sync/atomic"
+	"time"
+
 	"github.com/natefinch/lumberjack"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zapgrpc"
 	"google.golang.org/grpc/grpclog"
 	"k8s.io/klog/v2"
-	"os"
-	"strings"
-	"sync/atomic"
-	"time"
 )
 
 const (
+	// none is used to disable logging output as well as to disable stack tracing.
 	none          zapcore.Level = 100
 	GrpcScopeName string        = "grpc"
 )
@@ -43,6 +94,7 @@ var defaultEncoderConfig = zapcore.EncoderConfig{
 	EncodeTime:     formatDate,
 }
 
+// functions that can be replaced in a test setting
 type patchTable struct {
 	write       func(ent zapcore.Entry, fields []zapcore.Field) error
 	sync        func() error
@@ -60,6 +112,12 @@ var (
 	logGrpc bool
 )
 
+func init() {
+	// use our defaults for starters so that logging works even before everything is fully configured
+	_ = Configure(DefaultOptions())
+}
+
+// prepZap is a utility function used by the Configure function.
 func prepZap(options *Options) (zapcore.Core, zapcore.Core, zapcore.WriteSyncer, error) {
 	var enc zapcore.Encoder
 	if options.useStackdriverFormat {
@@ -223,6 +281,8 @@ func updateScopes(options *Options) error {
 	return nil
 }
 
+// processLevels breaks down an argument string into a set of scope & levels and then
+// tries to apply the result to the scopes. It supports the use of a global override.
 func processLevels(allScopes map[string]*Scope, arg string, setter func(*Scope, Level)) error {
 	levels := strings.Split(arg, ",")
 	for _, sl := range levels {
@@ -250,6 +310,11 @@ func processLevels(allScopes map[string]*Scope, arg string, setter func(*Scope, 
 	return nil
 }
 
+// Configure initializes Istio's logging subsystem.
+//
+// You typically call this once at process startup.
+// Once this call returns, the logging system is ready to accept data.
+// nolint: staticcheck
 func Configure(options *Options) error {
 	core, captureCore, errSink, err := prepZap(options)
 	if err != nil {
@@ -357,10 +422,13 @@ func Configure(options *Options) error {
 	return nil
 }
 
+// Sync flushes any buffered log entries.
+// Processes should normally take care to call Sync before exiting.
 func Sync() error {
 	return funcs.Load().(patchTable).sync()
 }
 
+// Close implements io.Closer.
 func Close() error {
 	return funcs.Load().(patchTable).close()
 }
